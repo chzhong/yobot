@@ -17,7 +17,7 @@ from quart import (Quart, jsonify, make_response, redirect, request, session,
 
 from ..templating import render_template
 from ..web_util import async_cached_func
-from ..ybdata import (Clan_challenge, Clan_group, Clan_member, Clan_subscribe,
+from ..ybdata import (Clan_challenge, Clan_delegate, Clan_group, Clan_member, Clan_subscribe,
                       User)
 from .exception import (ClanBattleError, GroupError, GroupNotExist, InputError,
                         UserError, UserNotInGroup)
@@ -26,6 +26,33 @@ from .util import atqq, pcr_datetime, pcr_timestamp, timed_cached_func
 
 _logger = logging.getLogger(__name__)
 
+class ShadowQQ:
+
+    PREFIX = 786
+    SHADOW_GAP = 100
+    MIN_SHADOW_NUM = 1
+    MAX_SHADOW_NUM = SHADOW_GAP - 1
+    BASE = QQid(PREFIX * 1_000_000_000_000)
+    MIN = QQid(BASE * SHADOW_GAP)
+
+    @staticmethod
+    def is_shadow(qqid: QQid):
+        return qqid > ShadowQQ.MIN
+
+    @staticmethod
+    def get_delegate(qqid: QQid) -> QQid:
+        return ShadowQQ(qqid).delegate
+
+    def __init__(self, qqid: QQid, shadow_num: Optional[int]=None) -> None:
+        if ShadowQQ.is_shadow(qqid):
+            self.qqid = qqid
+            self.delegate = QQid(qqid / ShadowQQ.SHADOW_GAP - ShadowQQ.BASE)
+            self.shadow_num = qqid % ShadowQQ.SHADOW_GAP
+            return qqid
+        else:
+            self.delegate = qqid
+            self.shadow_num = shadow_num
+            self.qqid = QQid((ShadowQQ.BASE + qqid) * ShadowQQ.SHADOW_GAP + shadow_num)
 
 class ClanBattle:
     Passive = True
@@ -64,6 +91,9 @@ class ClanBattle:
         '查5': 25,
         '强制': 26,
         '清空': 28,
+        '催刀': 989,
+        '代理': 990,
+        '小号': 991
     }
 
     Server = {
@@ -278,6 +308,40 @@ class ClanBattle:
         # refresh group list
         asyncio.ensure_future(self._update_group_list_async())
 
+    async def bind_group_principal(self, group_id: Groupid, principal_group_id: Groupid):
+        """
+        set group's principal to
+
+        Args:
+            group_id: delegate group id
+            principal_group_id: principal group id. 0 to cancel delegation
+        """
+        delegate = Clan_delegate.get_or_none(group_id=group_id)
+        if delegate is None and principal_group_id > 0:
+            delegate = Clan_delegate.create(group_id=group_id, principal_group_id=principal_group_id)
+        else:
+            if principal_group_id > 0:
+                delegate.principal_group_id = principal_group_id
+                delegate.save()
+            else:
+                principal_group_id = delegate.principal_group_id
+                delegate.delete_instance()
+                return principal_group_id
+
+    def get_group_principal(self, group_id: Groupid):
+        """
+        get group's principal
+
+        Args:
+            group_id: delegate group id
+        """
+        delegate = Clan_delegate.get_or_none(group_id=group_id)
+        if delegate is None:
+            # No delegation
+            return group_id
+        else:
+            return delegate.principal_group_id
+
     async def bind_group(self, group_id: Groupid, qqid: QQid, nickname: str):
         """
         set user's default group
@@ -316,6 +380,43 @@ class ClanBattle:
             ))
 
         return membership
+
+    async def bind_group_for_shadow(self, group_id: Groupid, qqid: QQid, nickname: str):
+        """
+        set user's default group
+
+        Args:
+            group_id: group id
+            qqid: qqid
+            nickname: displayed name
+        """
+        min_shadow = ShadowQQ(qqid, 0)
+        max_shadow = ShadowQQ(qqid, 99)
+        shadows = Clan_member.select().where(Clan_member.qqid.between(min_shadow.qqid, max_shadow.qqid))
+        if not shadows:
+            shadow_num = 1
+        else:
+            shadow_num = len(shadows) + 1
+        shadow = ShadowQQ(qqid, shadow_num)
+        return await self.bind_group(group_id, shadow.qqid, nickname)
+
+    async def unbind_group_for_shadow(self, group_id: Groupid, qqid: QQid, nickname: str):
+        """
+        set user's default group
+
+        Args:
+            group_id: group id
+            qqid: qqid
+            nickname: displayed name
+        """
+        min_shadow = ShadowQQ(qqid, 0)
+        max_shadow = ShadowQQ(qqid, 999)
+        shadows = User.select().where(User.qqid.between(min_shadow.qqid, max_shadow.qqid)
+         and User.nickname == nickname)
+        if not shadows:
+            return
+        shadow = shadows[0]
+        self.drop_member(group_id, [shadow.qqid])
 
     def drop_member(self, group_id: Groupid, member_list: List[QQid]):
         """
@@ -771,7 +872,7 @@ class ClanBattle:
             ))
         else:
             message = ' '.join((
-                atqq(qqid) for qqid in member_list
+                atqq(qqid) for qqid in member_list if not ShadowQQ.is_shadow(qqid)
             ))
             asyncio.ensure_future(self.api.send_group_msg(
                 group_id=group_id,
@@ -1277,6 +1378,8 @@ class ClanBattle:
         cmd = ctx['raw_message']
         group_id = ctx['group_id']
         user_id = ctx['user_id']
+        sender_group_id = group_id
+        group_id = self.get_group_principal(sender_group_id)
         if match_num == 1:  # 创建
             match = re.match(r'^创建(?:([日台韩国])服)?[公工行]会$', cmd)
             if not match:
@@ -1683,6 +1786,47 @@ class ClanBattle:
                 if m.get('message'):
                     reply += '：' + m['message']
             return reply
+        elif 989 == match_num:
+            _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+        elif 990 == match_num:
+            if (ctx['sender']['role'] == 'member'):
+                return
+            match = re.match(r'^代理(取消)?\s*(\d+)?\s*$', cmd)
+            if not match:
+                return
+            is_cancel = match.group(1)
+            if is_cancel:
+                asyncio.ensure_future(self.bind_group_principal(sender_group_id, Groupid(0)))
+                _logger.info('群聊 成功 {} {} {}'.format(user_id, sender_group_id, cmd))
+                return '已取消对代理'
+            else:
+                principal_group_id = match.group(2)
+                if not principal_group_id:
+                    return '请输入要代理的群号'
+                principal_group_id = Groupid(int(principal_group_id))
+                asyncio.ensure_future(self.bind_group_principal(sender_group_id, principal_group_id))
+                _logger.info('群聊 成功 {} {} {}'.format(user_id, sender_group_id, cmd))
+                return '本群已设置为代理 {} 群'.format(principal_group_id)
+        elif 991 == match_num:
+            if (ctx['sender']['role'] == 'member'):
+                return '只有管理员可以设置小号'
+            match = re.match(r'^小号(添加|删除)\s*(.+)\s*\[CQ:at,qq=(\d+)\]\s*$', cmd)
+            if not match:
+                match = re.match(r'^小号(添加|删除)\s*(.+)\s+(\d+)\s*$', cmd)
+                if not match:
+                    return '格式为：\n小号添加/删除 昵称 号主QQ\n- 或者 -\n小号添加/删除 昵称 号主QQ @号主'
+            shadow_action = match.group(1)
+            shadow_user_name = match.group(2)
+            owner_user_id = QQid(int(match.group(3)))
+            if '添加' == shadow_action:
+                asyncio.ensure_future(self.bind_group_for_shadow(group_id, owner_user_id, shadow_user_name))
+                _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+                return '已设置小号 {}(号主：{})'.format(shadow_user_name, atqq(owner_user_id))
+            elif '删除' == shadow_action:
+                asyncio.ensure_future(self.unbind_group_for_shadow(group_id, owner_user_id, shadow_user_name))
+                _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+                return '已删除小号 {}(号主：{}) 群'.format(shadow_user_name, atqq(owner_user_id))
+
 
     def register_routes(self, app: Quart):
 
