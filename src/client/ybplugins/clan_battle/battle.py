@@ -26,6 +26,8 @@ from .util import atqq, pcr_datetime, pcr_timestamp, timed_cached_func
 
 _logger = logging.getLogger(__name__)
 
+_NOT_FOUND_QQ = QQid(-404)
+
 class ShadowQQ:
 
     PREFIX = 786
@@ -42,6 +44,14 @@ class ShadowQQ:
     @staticmethod
     def get_delegate(qqid: QQid) -> QQid:
         return ShadowQQ(qqid).delegate
+
+    @staticmethod
+    def max_shadow(qqid: QQid):
+        return ShadowQQ(qqid, ShadowQQ.SHADOW_GAP - 1)
+
+    @staticmethod
+    def min_shadow(qqid: QQid):
+        return ShadowQQ(qqid, 1)
 
     def __init__(self, qqid: QQid, shadow_num: Optional[int]=None) -> None:
         if ShadowQQ.is_shadow(qqid):
@@ -390,8 +400,8 @@ class ClanBattle:
             qqid: qqid
             nickname: displayed name
         """
-        min_shadow = ShadowQQ(qqid, 0)
-        max_shadow = ShadowQQ(qqid, 99)
+        min_shadow = ShadowQQ.min_shadow(qqid)
+        max_shadow = ShadowQQ.max_shadow(qqid)
         shadows = Clan_member.select().where(Clan_member.qqid.between(min_shadow.qqid, max_shadow.qqid))
         if not shadows:
             shadow_num = 1
@@ -409,14 +419,37 @@ class ClanBattle:
             qqid: qqid
             nickname: displayed name
         """
-        min_shadow = ShadowQQ(qqid, 0)
-        max_shadow = ShadowQQ(qqid, 999)
+        min_shadow = ShadowQQ.min_shadow(qqid)
+        max_shadow = ShadowQQ.max_shadow(qqid)
         shadows = User.select().where(User.qqid.between(min_shadow.qqid, max_shadow.qqid)
          and User.nickname == nickname)
         if not shadows:
             return
         shadow = shadows[0]
         self.drop_member(group_id, [shadow.qqid])
+
+    def resolve_behalf(self, group_id: Groupid, behalf: Union[str, None]):
+        """
+        resolve behalf
+
+        Args:
+            group_id: group id
+            behalf: qqid or nickname
+        """
+        if not behalf:
+            return None
+        try:
+            return QQid(int(behalf))
+        except ValueError:
+            # Search by nick name
+            members = Clan_member.select(Clan_member, User).join(User, on=(Clan_member.qqid == User.qqid).alias('usr')) \
+                .where((Clan_member.group_id == group_id) & (User.nickname.contains(behalf)))
+            if not members:
+                return _NOT_FOUND_QQ
+            elif len(members) > 1:
+                return [item.usr.nickname for item in members]
+            _logger.info(f'昵称查找 {behalf} -> {members[0].qqid}')
+            return QQid(members[0].qqid)
 
     def drop_member(self, group_id: Groupid, member_list: List[QQid]):
         """
@@ -1464,7 +1497,10 @@ class ClanBattle:
             match = re.match(
                 r'^报刀 ?(\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
-                return
+                match = re.match(
+                    r'^报刀 ?(\d+)([Ww万Kk千])? *(?:@(.+))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                if not match:
+                    return
             unit = {
                 'W': 10000,
                 'w': 10000,
@@ -1474,7 +1510,13 @@ class ClanBattle:
                 '千': 1000,
             }.get(match.group(2), 1)
             damage = int(match.group(1)) * unit
-            behalf = match.group(3) and int(match.group(3))
+            #behalf = match.group(3) and int(match.group(3))
+            behalf = self.resolve_behalf(group_id, match.group(3))
+            if behalf == _NOT_FOUND_QQ:
+                return f'找不到昵称为【{match.group(3)}】的会员'
+            elif isinstance(behalf, list):
+                name_list = '\n- '.join(behalf)
+                return f'昵称【{match.group(3)}】不明确，可能是下面的人员:\n- {name_list}'
             previous_day = bool(match.group(4))
             extra_msg = match.group(5)
             if isinstance(extra_msg, str):
@@ -1494,7 +1536,7 @@ class ClanBattle:
                 _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
                 return str(e)
             if behalf:
-                user_id = match.group(3) and int(match.group(3))
+                user_id = behalf
             group = Clan_group.get_or_none(group_id=group_id)
             boss_num = group.boss_num
             counts = self.cancel_subscribe(group_id, user_id, boss_num)
@@ -1507,8 +1549,17 @@ class ClanBattle:
             match = re.match(
                 r'^尾刀 ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
-                return
-            behalf = match.group(1) and int(match.group(1))
+                match = re.match(
+                    r'^尾刀 ?(?:@(.+))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                if not match:
+                    return
+            # behalf = match.group(1) and int(match.group(1))
+            behalf = self.resolve_behalf(group_id, match.group(1))
+            if behalf == _NOT_FOUND_QQ:
+                return f'找不到昵称为【{match.group(1)}】的会员'
+            elif isinstance(behalf, list):
+                name_list = '\n- '.join(behalf)
+                return f'昵称【{match.group(1)}】不明确，可能是如下会员:\n- {name_list}'
             previous_day = bool(match.group(2))
             extra_msg = match.group(3)
             if isinstance(extra_msg, str):
@@ -1530,7 +1581,7 @@ class ClanBattle:
                 _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
                 return str(e)
             if behalf:
-                user_id = match.group(1) and int(match.group(1))
+                user_id = behalf
             counts = self.cancel_subscribe(group_id, user_id, boss_num)
             _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
             if counts == 0:
