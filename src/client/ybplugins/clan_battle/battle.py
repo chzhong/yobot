@@ -64,6 +64,53 @@ class ShadowQQ:
             self.shadow_num = shadow_num
             self.qqid = QQid((ShadowQQ.BASE + qqid) * ShadowQQ.SHADOW_GAP + shadow_num)
 
+class ClanMemberReport:
+
+    def __init__(self, qqid: QQid, nickname: str):
+        self.qqid = qqid
+        self.nickname = nickname
+        self.finished_count = 0
+        self.holds_tailing = False
+        self.challenges = []
+
+    def add_challenge(self, cycle, boss, is_tailing, is_continue):
+        challenge = f'{cycle}-{boss}'
+        if is_tailing and is_continue:
+            self.challenges.append(f'>{challenge}#')
+            self.holds_tailing = False
+            self.finished_count += 1
+        elif is_tailing:
+            self.challenges.append(f'{challenge}+')
+            self.holds_tailing = True
+        elif is_continue:
+            self.challenges.append(f'>{challenge}')
+            self.holds_tailing = False
+            self.finished_count += 1
+        else:
+            self.challenges.append(challenge)
+            self.finished_count += 1
+
+    @property
+    def finished(self):
+        return self.finished_count == 3
+
+    @property
+    def status(self):
+        status = ''
+        if self.finished_count == 3:
+            status += '已下班'
+        elif self.finished_count > 0 or self.holds_tailing:
+            status += f'已出{self.finished_count}刀，'
+            if self.holds_tailing and self.finished_count == 2:
+                status += '补偿刀未出'
+            elif self.holds_tailing:
+                status += f'补偿刀和{3 - self.finished_count - 1}刀未出'
+            else:
+                status += f'剩余{3 - self.finished_count}刀未出'
+        else:
+            status = '3刀未出'
+        return status
+
 class ClanBattle:
     Passive = True
     Active = True
@@ -1310,6 +1357,39 @@ class ClanBattle:
             continued_tailing_challenge_count,
         )
 
+    def get_clan_daily_challenge_report(self,
+                                        group_id: Groupid,
+                                        pcrdate: Optional[Pcr_date] = None,
+                                        battle_id: Union[int, None] = None,
+                                        ):
+        """
+        get the unfinished challanges
+
+        Args:
+            group_id: group id
+            battle_id: battle id
+            pcrdate: pcrdate of report
+        """
+        group = Clan_group.get_or_none(group_id=group_id)
+        if group is None:
+            raise GroupNotExist
+        if pcrdate is None:
+            pcrdate = pcr_datetime(group.game_server)[0]
+        if battle_id is None:
+            battle_id = group.battle_id
+        member_list = self.get_member_list(group_id)
+        member_reports = {} # type: Dict[QQid, ClanMemberReport]
+        for member in member_list:
+            member_reports[member['qqid']] = ClanMemberReport(member['qqid'], member['nickname'])
+        for challenge in Clan_challenge.select().where(
+            Clan_challenge.gid == group_id,
+            Clan_challenge.bid == battle_id,
+            Clan_challenge.challenge_pcrdate == pcrdate,
+        ):
+            report = member_reports[challenge.qqid]
+            report.add_challenge(challenge.boss_cycle, challenge.boss_num, challenge.boss_health_ramain == 0, challenge.is_continue)
+        return member_reports
+
     @timed_cached_func(max_len=64, max_age_seconds=10, ignore_self=True)
     def get_battle_member_list(self,
                                group_id: Groupid,
@@ -1838,6 +1918,19 @@ class ClanBattle:
                     reply += '：' + m['message']
             return reply
         elif 989 == match_num:
+            if (ctx['sender']['role'] == 'member'):
+                return
+            report = self.get_clan_daily_challenge_report(group_id)
+            unfinished_members = filter(lambda r: not r.finished, report.values())
+            unfinished_members = sorted(unfinished_members, key=lambda m: -m.finished_count)
+            if '催刀报告' == cmd:
+                if sender_group_id == group_id:
+                    return '未出完刀的成员：\n' + '\n'.join([atqq(member.qqid) + ' ' + str(member) for member in unfinished_members])
+                else:
+                    return '未出完刀的成员：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
+            else:
+                member_qq_list = [member.qqid for member in unfinished_members]
+                #self.send_remind(group_id, member_qq_list, user_id, '催刀私聊' == cmd)
             _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
         elif 990 == match_num:
             if (ctx['sender']['role'] == 'member'):
