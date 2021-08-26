@@ -1911,7 +1911,7 @@ class ClanBattle:
                     reply += '：' + m['message']
             return reply
         elif 989 == match_num:
-            if (ctx['sender']['role'] == 'member'):
+            if ctx['sender']['role'] == 'member':
                 return
             report = self.get_clan_daily_challenge_report(group_id)
             unfinished_members = filter(lambda r: not r.finished, report.values())
@@ -1921,13 +1921,19 @@ class ClanBattle:
                     return '请以下成员尽快出刀：\n' + '\n'.join([f'{atqq(member.qqid)} {member.status}' for member in unfinished_members])
                 else:
                     return '请以下成员尽快出刀：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
-            else:
+            elif cmd in ('催刀私聊', '催刀'):
                 member_qq_list = [member.qqid for member in unfinished_members]
                 self.send_remind(group_id, member_qq_list, user_id, '催刀私聊' == cmd)
+                if '催刀私聊' == cmd:
+                    return f'已私信 {len(member_qq_list)} 人进行催刀'
+            else:
+                return
             _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
         elif 990 == match_num:
-            if (ctx['sender']['role'] == 'member'):
+            if ctx['sender']['role'] == 'member':
                 return
+            if '代理帮助' == cmd:
+                return '管理员设置本群（管理员小群等）代理公会群：\n代理 公会群号\n或者由下面命令取消代理其他公会：\n代理取消'
             match = re.match(r'^代理(取消)?\s*(\d+)?\s*$', cmd)
             if not match:
                 return
@@ -1945,13 +1951,15 @@ class ClanBattle:
                 _logger.info('群聊 成功 {} {} {}'.format(user_id, sender_group_id, cmd))
                 return '本群已设置为代理 {} 群'.format(principal_group_id)
         elif 991 == match_num:
-            if (ctx['sender']['role'] == 'member'):
-                return '只有管理员可以设置小号'
+            if ctx['sender']['role'] == 'member':
+                return
+            if '小号帮助' == cmd:
+                return '管理员可以添加/删除小号：\n小号添加/删除 昵称 号主QQ\n- 或者 -\n小号添加/删除 昵称 号主QQ @号主'
             match = re.match(r'^小号(添加|删除)\s*(.+)\s*\[CQ:at,qq=(\d+)\]\s*$', cmd)
             if not match:
                 match = re.match(r'^小号(添加|删除)\s*(.+)\s+(\d+)\s*$', cmd)
                 if not match:
-                    return '格式为：\n小号添加/删除 昵称 号主QQ\n- 或者 -\n小号添加/删除 昵称 号主QQ @号主'
+                    return
             shadow_action = match.group(1)
             shadow_user_name = match.group(2)
             owner_user_id = QQid(int(match.group(3)))
