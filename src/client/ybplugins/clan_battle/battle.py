@@ -19,14 +19,12 @@ from ..templating import render_template
 from ..web_util import async_cached_func
 from ..ybdata import (Clan_challenge, Clan_delegate, Clan_group, Clan_member, Clan_subscribe,
                       User)
-from .exception import (ClanBattleError, GroupError, GroupNotExist, InputError,
+from .exception import (ClanBattleError, GroupError, GroupNotExist, InputError, NickNameAmbigous, NickNameNotFound,
                         UserError, UserNotInGroup)
 from .typing import BossStatus, ClanBattleReport, Groupid, Pcr_date, QQid
 from .util import atqq, pcr_datetime, pcr_timestamp, timed_cached_func
 
 _logger = logging.getLogger(__name__)
-
-_NOT_FOUND_QQ = QQid(-404)
 
 class ShadowQQ:
 
@@ -99,16 +97,13 @@ class ClanMemberReport:
         status = ''
         if self.finished_count == 3:
             status += '已下班'
-        elif self.finished_count > 0 or self.holds_tailing:
-            status += f'已出{self.finished_count}刀，'
+        else:
             if self.holds_tailing and self.finished_count == 2:
                 status += '补偿刀未出'
             elif self.holds_tailing:
-                status += f'补偿刀和{3 - self.finished_count - 1}刀未出'
+                status += f'补偿刀和{3 - self.finished_count - 1}完整刀未出'
             else:
-                status += f'剩余{3 - self.finished_count}刀未出'
-        else:
-            status = '3刀未出'
+                status += f'{3 - self.finished_count}刀未出'
         return status
 
 class ClanBattle:
@@ -492,9 +487,9 @@ class ClanBattle:
             members = Clan_member.select(Clan_member, User).join(User, on=(Clan_member.qqid == User.qqid).alias('usr')) \
                 .where((Clan_member.group_id == group_id) & (User.nickname.contains(behalf)))
             if not members:
-                return _NOT_FOUND_QQ
+                raise NickNameNotFound(behalf)
             elif len(members) > 1:
-                return [item.usr.nickname for item in members]
+                raise NickNameAmbigous(behalf, [item.usr.nickname for item in members])
             _logger.info(f'昵称查找 {behalf} -> {members[0].qqid}')
             return QQid(members[0].qqid)
 
@@ -1591,12 +1586,11 @@ class ClanBattle:
             }.get(match.group(2), 1)
             damage = int(match.group(1)) * unit
             #behalf = match.group(3) and int(match.group(3))
-            behalf = self.resolve_behalf(group_id, match.group(3))
-            if behalf == _NOT_FOUND_QQ:
-                return f'找不到昵称为【{match.group(3)}】的会员'
-            elif isinstance(behalf, list):
-                name_list = '\n- '.join(behalf)
-                return f'昵称【{match.group(3)}】不明确，可能是下面的人员:\n- {name_list}'
+            try:
+                behalf = self.resolve_behalf(group_id, match.group(3))
+            except (NickNameNotFound, NickNameAmbigous) as e:
+                _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+                return str(e)
             previous_day = bool(match.group(4))
             extra_msg = match.group(5)
             if isinstance(extra_msg, str):
@@ -1634,12 +1628,11 @@ class ClanBattle:
                 if not match:
                     return
             # behalf = match.group(1) and int(match.group(1))
-            behalf = self.resolve_behalf(group_id, match.group(1))
-            if behalf == _NOT_FOUND_QQ:
-                return f'找不到昵称为【{match.group(1)}】的会员'
-            elif isinstance(behalf, list):
-                name_list = '\n- '.join(behalf)
-                return f'昵称【{match.group(1)}】不明确，可能是如下会员:\n- {name_list}'
+            try:
+                behalf = self.resolve_behalf(group_id, match.group(1))
+            except (NickNameNotFound, NickNameAmbigous) as e:
+                _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+                return str(e)
             previous_day = bool(match.group(2))
             extra_msg = match.group(3)
             if isinstance(extra_msg, str):
@@ -1925,12 +1918,12 @@ class ClanBattle:
             unfinished_members = sorted(unfinished_members, key=lambda m: -m.finished_count)
             if '催刀报告' == cmd:
                 if sender_group_id == group_id:
-                    return '未出完刀的成员：\n' + '\n'.join([atqq(member.qqid) + ' ' + str(member) for member in unfinished_members])
+                    return '请以下成员尽快出刀：\n' + '\n'.join([f'{atqq(member.qqid)} {member.status}' for member in unfinished_members])
                 else:
-                    return '未出完刀的成员：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
+                    return '请以下成员尽快出刀：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
             else:
                 member_qq_list = [member.qqid for member in unfinished_members]
-                #self.send_remind(group_id, member_qq_list, user_id, '催刀私聊' == cmd)
+                self.send_remind(group_id, member_qq_list, user_id, '催刀私聊' == cmd)
             _logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
         elif 990 == match_num:
             if (ctx['sender']['role'] == 'member'):
