@@ -9,7 +9,7 @@ RUN apk add --no-cache --virtual .build_yobot gcc musl-dev tzdata \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo 'Asia/Shanghai' >/etc/timezone \
     && cd /yobot \
-    && pip3 install -r requirements.txt --no-cache-dir \
+    && pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir \
     && apk del --no-network .build_yobot \
     && { \
         echo "echo \$\$ > yobotg.pid"; \

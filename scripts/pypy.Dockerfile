@@ -8,7 +8,7 @@ ADD src/client/ /yobot
 RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo 'Asia/Shanghai' >/etc/timezone \
     && cd /yobot \
-    && pip install -r requirements.txt --no-cache-dir \
+    && pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir \
     && { \
         echo "echo \$\$ > yobotg.pid"; \
         echo "loop=true"; \
