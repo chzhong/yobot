@@ -88,9 +88,22 @@ class ClanMemberReport:
             self.challenges.append(challenge)
             self.finished_count += 1
 
+    def atqq(self):
+        if ShadowQQ.is_shadow(self.qqid):
+            return atqq(ShadowQQ.get_delegate(self.qqid)) + ' ' + self.nickname
+        else:
+            return atqq(self.qqid)
+
     @property
     def finished(self):
         return self.finished_count == 3
+
+    @property
+    def unfinished(self):
+        if self.holds_tailing:
+            return 3 - self.finished_count - 1
+        else:
+            return 3 - self.finished_count
 
     @property
     def status(self):
@@ -944,7 +957,7 @@ class ClanBattle:
         if send_private_msg:
             asyncio.ensure_future(self.send_private_remind(
                 member_list=member_list,
-                content=f'{sender_name}提醒您及时完成今日出刀',
+                content=f'{sender_name}提醒您及时完成今日出刀，早出到早下班',
             ))
         else:
             message = ' '.join((
@@ -952,7 +965,7 @@ class ClanBattle:
             ))
             asyncio.ensure_future(self.api.send_group_msg(
                 group_id=group_id,
-                message=message+f'\n=======\n{sender_name}提醒您及时完成今日出刀',
+                message=message+f'\n=======\n{sender_name}提醒您及时完成今日出刀，早出到早下班',
             ))
 
     def add_subscribe(self, group_id: Groupid, qqid: QQid, boss_num, message=None):
@@ -1917,9 +1930,11 @@ class ClanBattle:
             report = self.get_clan_daily_challenge_report(group_id)
             unfinished_members = filter(lambda r: not r.finished, report.values())
             unfinished_members = sorted(unfinished_members, key=lambda m: -m.finished_count)
+            unfinished_count = sum(map(lambda m: m.unfinished, unfinished_members))
+            unfinished_continue = sum(map(lambda m: m.holds_tailing, unfinished_members))
             if '催刀报告' == cmd:
                 if sender_group_id == group_id:
-                    return '请以下成员尽快出刀：\n' + '\n'.join([f'{atqq(member.qqid)} {member.status}' for member in unfinished_members])
+                    return f'尚有 {unfinished_count} 完整刀和 {unfinished_continue} 补偿刀未出。请以下 {len(unfinished_members)} 名成员尽快出刀：\n' + '\n'.join([f'{member.atqq()} {member.status}' for member in unfinished_members])
                 else:
                     return '请以下成员尽快出刀：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
             elif cmd in ('催刀私聊', '催刀'):
