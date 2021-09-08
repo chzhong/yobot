@@ -103,7 +103,7 @@ class ClanMemberReport:
             elif self.holds_tailing:
                 status += f'补偿刀和{3 - self.finished_count - 1}完整刀未出'
             else:
-                status += f'{3 - self.finished_count}刀未出'
+                status += f'剩{3 - self.finished_count}刀未出'
         return status
 
 class ClanBattle:
@@ -484,6 +484,7 @@ class ClanBattle:
             return QQid(int(behalf))
         except ValueError:
             # Search by nick name
+            _logger.info(f'根据昵称查找: {behalf}')
             members = Clan_member.select(Clan_member, User).join(User, on=(Clan_member.qqid == User.qqid).alias('usr')) \
                 .where((Clan_member.group_id == group_id) & (User.nickname.contains(behalf)))
             if not members:
@@ -1573,7 +1574,7 @@ class ClanBattle:
                 r'^报刀 ?(\d+)([Ww万Kk千])? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
                 match = re.match(
-                    r'^报刀 ?(\d+)([Ww万Kk千])? *(?:@(.+))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                    r'^报刀 ?(\d+)([Ww万Kk千])? *(?:@(.+?))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
                 if not match:
                     return
             unit = {
@@ -1588,7 +1589,7 @@ class ClanBattle:
             #behalf = match.group(3) and int(match.group(3))
             try:
                 behalf = self.resolve_behalf(group_id, match.group(3))
-            except (NickNameNotFound, NickNameAmbigous) as e:
+            except ClanBattleError as e:
                 _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
                 return str(e)
             previous_day = bool(match.group(4))
@@ -1624,13 +1625,13 @@ class ClanBattle:
                 r'^尾刀 ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
             if not match:
                 match = re.match(
-                    r'^尾刀 ?(?:@(.+))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
+                    r'^尾刀 ?(?:@(.+?))? *(昨[日天])? *(?:[\:：](.*))?$', cmd)
                 if not match:
                     return
             # behalf = match.group(1) and int(match.group(1))
             try:
                 behalf = self.resolve_behalf(group_id, match.group(1))
-            except (NickNameNotFound, NickNameAmbigous) as e:
+            except ClanBattleError as e:
                 _logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
                 return str(e)
             previous_day = bool(match.group(2))
