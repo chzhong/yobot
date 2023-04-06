@@ -473,10 +473,28 @@ class Login:
             new_nickname = new_setting.get('nickname')
             if new_nickname is not None:
                 user_data.nickname = new_nickname
+            new_clan_group_id = new_setting.get('clan_group_id')
+            old_clan_group_id = None
+            if new_clan_group_id is not None:
+                old_clan_group_id = user_data.clan_group_id
+                user_data.clan_group_id = int(new_clan_group_id) if new_clan_group_id else None
             new_notify_preference = new_setting.get('notify_preference')
             if new_notify_preference is not None:
                 user_data.notify_preference = new_notify_preference
             user_data.save()
+            if old_clan_group_id is not None:
+                Clan_member.delete().where(
+                    Clan_member.qqid==qqid, 
+                    Clan_member.group_id==old_clan_group_id
+                ).execute()
+            if new_clan_group_id:
+                Clan_member.get_or_create(
+                    group_id=int(new_clan_group_id),
+                    qqid=qqid,
+                    defaults={
+                        'role': 100,
+                    }
+                )
             return jsonify(code=0, message='success')
 
         @app.route(
