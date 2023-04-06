@@ -1,3 +1,6 @@
+*.pid
+yobot_data/
+__pycache__
 venv
 *.py[cdo]
 .vscode/
