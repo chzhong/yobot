@@ -16,6 +16,7 @@ src/client/*.db
 src/client/*.db-*
 src/client/*.ics
 src/client/*.pid
+src/client/yobot_data/
 src/client/test.py
 .env
 cqhttp
