@@ -6,7 +6,7 @@ from .web_util import rand_string
 
 db_mode = True  # True为本地（原），Flase为为改为mysql（需要在第15行配置使用）
 
-_version = 2  # 目前版本
+_version = 3  # 目前版本
 MAX_TRY_TIMES = 5
 
 if db_mode:
@@ -60,6 +60,13 @@ class User_login(_BaseModel):
 
     class Meta:
         primary_key = CompositeKey("qqid", "auth_cookie")
+
+
+class Clan_delegate(_BaseModel):
+    group_id = BigIntegerField(primary_key=True)
+    group_name = TextField(null=True)
+    principal_group_id = BigIntegerField(index=True)
+    principal_group_name = BigIntegerField(null=True)
 
 
 # 原谅我mongodb用习惯了
@@ -180,6 +187,7 @@ def init(sqlite_filename):
         Admin_key.create_table()
         User.create_table()
         User_login.create_table()
+        Clan_delegate.create_table()
         Clan_group.create_table()
         Clan_member.create_table()
         Clan_group_backups.create_table()
@@ -198,7 +206,7 @@ def init(sqlite_filename):
 def db_upgrade(old_version):
     migrator = SqliteMigrator(_db)
     if old_version < 2:
-        pass
+        Clan_delegate.create_table()
     if old_version <= 1:
         """
         更新预约表存储结构

@@ -60,6 +60,8 @@ class Setting:
             page=req_querys['page'],
             paginate_by=req_querys['page_size']
         )
+        for u in users:
+            u.qqid = str(u.qqid)
         return json.dumps({
             'code': 0,
             'data': [model_to_dict(u, only=_returned_query_fileds) for u in users],

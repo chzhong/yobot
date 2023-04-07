@@ -16,6 +16,13 @@ from .define import Commands, Server
 _logger = logging.getLogger(__name__)
 
 
+def match_patterns(patterns: [str], cmd: str):
+	for pattern in patterns:
+		match = re.match(pattern, cmd)
+		if match:
+			return match
+	return None
+
 #初始化
 def init(self,
 		 glo_setting:Dict[str, Any],
@@ -89,6 +96,9 @@ def execute(self, match_num, ctx):
 	cmd = ctx['raw_message']
 	group_id = ctx['group_id']
 	user_id = ctx['user_id']
+	# 代理群转换
+	sender_group_id = group_id	# 发指令的群
+	group_id = self.get_group_principal(sender_group_id) # 公会群
 	url = urljoin(
 		self.setting['public_address'],
 		'{}clan/{}/'.format(self.setting['public_basepath'],
@@ -146,12 +156,27 @@ def execute(self, match_num, ctx):
 
 
 	elif match_num == 4:  # 报刀
-		match = re.match(r'^报刀 ?(?:[\-\=]([1-5]))? ?(\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$', cmd)
+		# 1: boss_num, 2: damage, 3: unit?, 4: continue?, 5: behalf?, 6: yesterday?
+		match = match_patterns((
+			# 报刀 [-=]boss_num 伤害[单位] [补偿] @qq [昨日]
+			r"^报刀 ?(?:[-=]?([1-5]))? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$",
+			# 报刀 [-=]boss_num 伤害[单位] [补偿] @昵称 [昨日]
+			r"^报刀 ?(?:[-=]?([1-5]))? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$",
+		), cmd)
+		match = re.match(, cmd)
 		if not match:
-			# 尝试使用另外的匹配模式
-			match = re.match(r'^报刀 ?([1-5])? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$', cmd)
-			if not match:
-				return '报刀格式:\n报刀 100w（需先申请出刀）\n报刀 -1 100w（-1表示报在1王）'
+			return '''报刀格式:
+报刀 [boss编号(1-5)] 伤害 [是否补偿] [@被代人] [是否昨日]
+比如：
+报刀 1700w（需先申请出刀）
+报刀 1 1700w（1表示报在1王）
+报刀 1 250w 补（b表示出补偿刀）
+报刀 1 1700w 昨日（昨日代表补报昨天的出刀）
+
+伤害可以用具体伤害，也可以用带单位的伤害（支持的单位：wW万）；如果击败Boss收尾请使用“尾刀”指令。
+可以跟 @某人 代为报刀，@ 后面可以是 QQ 或者是昵称
+可以跟 昨日 补报昨天的刀
+'''
 		unit = {
 			'W': 10000,
 			'w': 10000,
@@ -163,7 +188,13 @@ def execute(self, match_num, ctx):
 		boss_num = match.group(1)
 		damage = int(match.group(2) or 0) * unit
 		is_continue = match.group(4) and True or False
-		behalf = match.group(5) and int(match.group(5))
+		# behalf = match.group(5) and int(match.group(5))
+		# 支持昵称代报刀
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(5))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		previous_day = bool(match.group(6))
 		try:
 			boss_status = self.challenge(group_id, user_id, False, damage, behalf, is_continue,
@@ -179,9 +210,21 @@ def execute(self, match_num, ctx):
 
 
 	elif match_num == 5:  # 尾刀
-		match = re.match(r'^尾刀 ?([1-5])? *(补偿|补|b|bc)? ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$', cmd)
+		# 1: boss_num, 2: continue?, 3: behalf?, 4: yesterday?
+		match = match_patterns((
+			# 尾刀 [boss_num] [补偿] @qq [昨日]
+			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$',
+			# 尾刀 [boss_num] [补偿] @昵称 [昨日]
+			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? ?(?:@(.+?))? *(昨[日天])?$',
+		), cmd)
 		if not match: return
-		behalf = match.group(3) and int(match.group(3))
+		#behalf = match.group(3) and int(match.group(3))
+		# 支持昵称代报刀
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(3))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		is_continue = match.group(2) and True or False
 		boss_num = match.group(1)
 
@@ -209,11 +252,23 @@ def execute(self, match_num, ctx):
 		return boss_status
 
 	elif match_num == 7:  # 预约
-		match = re.match(r'^预约([1-5]|表) *(?:[:：](.*))? *(?:\[CQ:at,qq=(\d+)\])? *$', cmd)
+		# 1: boss_num, 2: message?, 3: behalf?
+		match = match_patterns((
+			# 预约表
+			# 预约boos_num [：留言] [@qq]
+			r'^预约([1-5]|表) *(?:[:：](.+))? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			# 预约boos_num [：留言] [@昵称]
+			r'^预约([1-5]|表) *(?:[:：](.+))? *(?:@(.+?))? *$',
+		), cmd)
 		if not match: return
 		msg = match.group(1)
 		note = match.group(2) or ''
-		behalf = match.group(3) or None
+		#behalf = match.group(3) or None
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(3))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		if behalf : user_id = int(behalf)
 		try:
 			back_msg = self.subscribe(group_id, user_id, msg, note)
@@ -224,7 +279,7 @@ def execute(self, match_num, ctx):
 		return back_msg
 
 	elif match_num == 8:  # 业绩
-		match = re.match(r'^业绩(表) *$', cmd)
+		match = re.match(r'^业绩表? *$', cmd)
 		if not match: return
 		try:
 			back_msg = self.score_table(group_id)
@@ -246,10 +301,22 @@ def execute(self, match_num, ctx):
 		return back_msg
 
 	elif match_num == 11:  # 挂树
-		match = re.match(r'^挂树 *(?:[\:：](.*))? *(?:\[CQ:at,qq=(\d+)\])? *$', cmd)
+		# 1: message?, 2: behalf?
+		match = match_patterns((
+			# 挂树[：留言] [@qq]
+			r'^挂树 *(?:[\:：](.*))? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			# 挂树[：留言] [@昵称]
+			r'^预约([1-5]|表) *(?:[:：](.+))? *(?:@(.+?))? *$',
+		), cmd)
 		if not match: return
 		extra_msg = match.group(1)
-		behalf = match.group(2) and int(match.group(2))
+		#behalf = match.group(2) and int(match.group(2))
+		# 支持昵称代挂树
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(2))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		behalf = behalf or user_id
 		if isinstance(extra_msg, str):
 			extra_msg = extra_msg.strip()
@@ -266,11 +333,24 @@ def execute(self, match_num, ctx):
 		return msg
 
 	elif match_num == 12:  # 申请
-		match = re.match(r'^(?:进|申请出刀)(| )([1-5]) *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *$', cmd)
-		if not match: return '申请出刀格式错误惹(っ °Д °;)っ\n如：申请出刀1 or 申请出刀1补偿@xxx'
+		# 1: (blank), 2: boss_num, 3: continue?,  4: behalf?
+		match = match_patterns((
+			# 进(1-5) [补] [@qq]
+			# 申请出刀(1-5) [补]  [@qq]
+			r'^(?:进|申请出刀)(| )([1-5]) *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			# 挂树[：留言] [@昵称]
+			r'^(?:进|申请出刀)(| )([1-5]) *(补偿|补|b|bc)? *(?:@(.+?))? *$',
+		), cmd)
+		if not match: return '申请出刀格式错误惹(っ °Д °;)っ\n如：申请出刀1 or 进1 or 申请出刀1补偿@xxx or 进1补偿@xxx'
 		boss_num = match.group(2)
 		is_continue = match.group(3) and True or False
-		behalf = match.group(4) and int(match.group(4))
+		#behalf = match.group(4) and int(match.group(4))
+		# 支持昵称代进刀
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(4))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		try:
 			boss_info = self.apply_for_challenge(is_continue, group_id, user_id, boss_num, behalf)
 			# if behalf:
@@ -283,11 +363,21 @@ def execute(self, match_num, ctx):
 		return boss_info
 
 	elif match_num == 13:  # 取消
-		match = re.match(r'^取消 *([1-5]|挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:\[CQ:at,qq=(\d+)\])? *$', cmd)
+		# 1: boss_num or type, 2: boss_num?, 3: behalf?
+		match = match_patterns((
+			r'^取消 *([1-5]|挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			r'^取消 *([1-5]|挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:@(.+?))? *$',
+		), cmd)
 		if not match: return
 		b = match.group(1)
 		boss_num = match.group(2) and match.group(2)
-		behalf = match.group(3) and int(match.group(3))
+		#behalf = match.group(3) and int(match.group(3))
+		# 支持昵称代取消
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(3))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		if behalf:
 			user_id = behalf
 		try:
@@ -316,9 +406,19 @@ def execute(self, match_num, ctx):
 		return f'公会战面板：\n{url}\n建议添加到浏览器收藏夹或桌面快捷方式'
 
 	elif match_num == 16:  # SL
-		match = re.match(r'^(?:SL|sl) *([\?？])? *(?:\[CQ:at,qq=(\d+)\])? *([\?？])? *$', cmd)
+		# 1: chekc?, 2: behalf?
+		match = match_patterns((
+			r'^查?(?:SL|sl) *([\?？])? *(?:\[CQ:at,qq=(\d+)\])? *([\?？])? *$',
+			r'^查?(?:SL|sl) *([\?？])? *(?:@(.+?))? *([\?？])? *$',
+		), cmd)
 		if not match: return
-		behalf = match.group(2) and int(match.group(2))
+		#behalf = match.group(2) and int(match.group(2))
+		# 支持昵称代SL
+		try:
+			behalf = self.resolve_behalf(group_id, match.group(2))
+		except ClanBattleError as e:
+			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
 		only_check = bool(match.group(1) or match.group(3))
 		if behalf: user_id = behalf
 		# if not self.check_blade(group_id, user_id) and not only_check:
@@ -347,7 +447,7 @@ def execute(self, match_num, ctx):
 		if not self.check_blade(group_id, user_id):
 			return '你都没申请出刀，报啥子伤害啊 (╯‵□′)╯︵┻━┻'
 		return self.report_hurt(int(s), hurt, group_id, user_id)
-	
+
 	#TODO 权限申请封装func调用
 	elif match_num == 18:  #权限，设置意外无权限用户有权限
 		match = re.match(r'^更改权限 *(?:\[CQ:at,qq=(\d+)\])? *$', cmd)
@@ -364,13 +464,13 @@ def execute(self, match_num, ctx):
 			user.nickname = nickname
 			user.clan_group_id = group_id
 			if user.authority_group >= 10:
-				user.authority_group = (100 if ctx['sender']['role'] == 'member' else 10)					
+				user.authority_group = (100 if ctx['sender']['role'] == 'member' else 10)
 				membership.role = user.authority_group
 			user.save()
 			membership.save()
 			_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
 			return '{}已成功申请权限'.format(atqq(user_id))
-	
+
 	elif match_num == 19:  #更改预约模式
 	#TODO 19:更改预约模式
 		print("完成度0%")
@@ -391,6 +491,71 @@ def execute(self, match_num, ctx):
 		_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
 		return "进度已重置\n当前档案编号已从 {} 切换为 {}".format(current_data_slot_record, available_empty_battle_id)
 
+	elif match_num == 99: # 催刀
+		if ctx['sender']['role'] == 'member':
+			return "只有管理员有权限催刀"
+		report = self.get_clan_daily_challenge_report(group_id)
+		unfinished_members = filter(lambda r: not r.finished, report.values())
+		unfinished_members = sorted(unfinished_members, key=lambda m: -m.finished_count)
+		unfinished_count = sum(map(lambda m: m.unfinished, unfinished_members))
+		unfinished_continue = sum(map(lambda m: m.holds_tailing, unfinished_members))
+		if '催刀报告' == cmd:
+			if sender_group_id == group_id:
+				return f'尚有 {unfinished_count} 完整刀和 {unfinished_continue} 补偿刀未出。请以下 {len(unfinished_members)} 名成员尽快出刀：\n' + '\n'.join([f'{member.atqq()} {member.status}' for member in unfinished_members])
+			else:
+				return '请以下成员尽快出刀：\n' + '\n'.join([f'{member.nickname}: {member.status}' for member in unfinished_members])
+		elif cmd in ('催刀私聊', '催刀'):
+			member_qq_list = [member.qqid for member in unfinished_members]
+			self.send_remind(group_id, member_qq_list, user_id, '催刀私聊' == cmd)
+			if '催刀私聊' == cmd:
+				return f'已私信 {len(member_qq_list)} 人进行催刀'
+		else:
+			return
+		_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+
+	elif match_num == 970: #代理群设置
+		if ctx['sender']['role'] == 'member':
+			return
+		if '代理帮助' == cmd:
+			return '管理员设置本群（管理员小群等）代理公会群：\n代理 公会群号\n或者由下面命令取消代理其他公会：\n代理取消'
+		match = re.match(r'^代理(取消)?\s*(\d+)?\s*$', cmd)
+		if not match:
+			return
+		is_cancel = match.group(1)
+		if is_cancel:
+			self.bind_group_principal(sender_group_id, Groupid(0))
+			_logger.info('群聊 成功 {} {} {}'.format(user_id, sender_group_id, cmd))
+			return '已取消对代理'
+		else:
+			principal_group_id = match.group(2)
+			if not principal_group_id:
+				return '请输入要代理的群号'
+			principal_group_id = Groupid(int(principal_group_id))
+			self.bind_group_principal(sender_group_id, principal_group_id)
+			_logger.info('群聊 成功 {} {} {}'.format(user_id, sender_group_id, cmd))
+			return '本群已设置为代理 {} 群'.format(principal_group_id)
+
+	elif match_num == 980: #小号设置
+		if ctx['sender']['role'] == 'member':
+			return
+		if '小号帮助' == cmd:
+			return '管理员可以添加/删除小号：\n小号添加/删除 昵称 号主QQ\n- 或者 -\n小号添加/删除 昵称 号主QQ @号主'
+		match = re.match(r'^小号(添加|删除)\s*(.+)\s*\[CQ:at,qq=(\d+)\]\s*$', cmd)
+		if not match:
+			match = re.match(r'^小号(添加|删除)\s*(.+)\s+(\d+)\s*$', cmd)
+			if not match:
+				return
+		shadow_action = match.group(1)
+		shadow_user_name = match.group(2)
+		owner_user_id = QQid(int(match.group(3)))
+		if '添加' == shadow_action:
+			self.bind_group_for_shadow(group_id, owner_user_id, shadow_user_name)
+			_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+			return '已设置小号 {}(号主：{})'.format(shadow_user_name, atqq(owner_user_id))
+		elif '删除' == shadow_action:
+			self.unbind_group_for_shadow(group_id, owner_user_id, shadow_user_name)
+			_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+			return '已删除小号 {}(号主：{}) 群'.format(shadow_user_name, atqq(owner_user_id))
 
 
 

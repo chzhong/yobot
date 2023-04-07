@@ -470,10 +470,30 @@ class Login:
             if new_setting is None:
                 return jsonify(code=30, message='消息体格式错误')
             new_nickname = new_setting.get('nickname')
-            if new_nickname is None:
+            new_clan_group_id = new_setting.get('clan_group_id')
+            if new_nickname is None and new_clan_group_id is None:
                 return jsonify(code=32, message='消息体内容错误')
-            user_data.nickname = new_nickname
-            user_data.save()
+            if new_nickname is not None:
+                user_data.nickname = new_nickname
+                user_data.save()
+            old_clan_group_id = None
+            if new_clan_group_id is not None:
+                old_clan_group_id = user_data.clan_group_id
+                user_data.clan_group_id = int(new_clan_group_id) if new_clan_group_id else None
+            if old_clan_group_id is not None:
+                Clan_member.delete().where(
+                    Clan_member.qqid == qqid,
+                    Clan_member.group_id == old_clan_group_id
+                ).execute()
+            if new_clan_group_id:
+                Clan_member.get_or_create(
+                    group_id=int(new_clan_group_id),
+                    qqid=qqid,
+                    defaults={
+                        'role': 100,
+                    }
+                )
+
             return jsonify(code=0, message='success')
 
         @app.route(

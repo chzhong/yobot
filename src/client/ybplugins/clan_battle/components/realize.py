@@ -12,13 +12,15 @@ from PIL import Image, ImageFont, ImageDraw
 from typing import Any, Dict, List, Optional, Union, Tuple
 
 from .handler import SubscribeHandler
+from .shadow import  ShadowQQ
+from .member_report import ClanMemberReport
 
 from ..typing import ClanBattleReport, Groupid, Pcr_date, QQid
 from ...web_util import async_cached_func
 from ..util import atqq, pcr_datetime, pcr_timestamp, timed_cached_func
 
-from ...ybdata import Clan_challenge, Clan_group, Clan_member, User, Clan_group_backups
-from ..exception import GroupError, GroupNotExist, InputError, UserError, UserNotInGroup
+from ...ybdata import Clan_challenge, Clan_delegate, Clan_group, Clan_member, User, Clan_group_backups
+from ..exception import GroupError, GroupNotExist, InputError, NickNameAmbigous, NickNameNotFound, UserError, UserNotInGroup
 from .multi_cq_utils import who_am_i
 
 _logger = logging.getLogger(__name__)
@@ -38,8 +40,138 @@ def text_2_pic(self, text:string, weight:int, height:int, bg_color:Tuple, text_c
 	base64_str = 'base64://' + base64.b64encode(bio.getvalue()).decode()
 	return f"[CQ:image,file={base64_str}]"
 
+
+
+def bind_group_principal(self, group_id: Groupid, principal_group_id: Groupid):
+	"""
+	set group's principal to
+	Args:
+		group_id: delegate group id
+		principal_group_id: principal group id. 0 to cancel delegation
+	"""
+	delegate = Clan_delegate.get_or_none(group_id=group_id)
+	if delegate is None and principal_group_id > 0:
+		delegate = Clan_delegate.create(group_id=group_id, principal_group_id=principal_group_id)
+	else:
+		if principal_group_id > 0:
+			delegate.principal_group_id = principal_group_id
+			delegate.save()
+		else:
+			principal_group_id = delegate.principal_group_id
+			delegate.delete_instance()
+			return principal_group_id
+
+
+def get_group_principal(self, group_id: Groupid):
+	"""
+	get group's principal
+	Args:
+		group_id: delegate group id
+	"""
+	delegate = Clan_delegate.get_or_none(group_id=group_id)
+	if delegate is None:
+		# No delegation
+		return group_id
+	else:
+		return delegate.principal_group_id
+
+
+def bind_group_for_shadow(self, group_id: Groupid, qqid: QQid, nickname: str):
+	"""
+	set user's default group
+	Args:
+		group_id: group id
+		qqid: qqid
+		nickname: displayed name
+	"""
+	min_shadow = ShadowQQ.min_shadow(qqid)
+	max_shadow = ShadowQQ.max_shadow(qqid)
+	shadows = Clan_member.select().where(Clan_member.qqid.between(min_shadow.qqid, max_shadow.qqid))
+	if not shadows:
+		shadow_num = 1
+	else:
+		shadow_num = len(shadows) + 1
+	shadow = ShadowQQ(qqid, shadow_num)
+	return await self.bind_group(group_id, shadow.qqid, nickname)
+
+def unbind_group_for_shadow(self, group_id: Groupid, qqid: QQid, nickname: str):
+	"""
+    set user's default group
+    Args:
+        group_id: group id
+        qqid: qqid
+        nickname: displayed name
+    """
+	min_shadow = ShadowQQ.min_shadow(qqid)
+	max_shadow = ShadowQQ.max_shadow(qqid)
+	shadows = User.select().where(User.qqid.between(min_shadow.qqid, max_shadow.qqid)
+								  and User.nickname == nickname)
+	if not shadows:
+		return
+	shadow = shadows[0]
+	self.drop_member(group_id, [shadow.qqid])
+
+
+def resolve_behalf(self, group_id: Groupid, behalf: Union[str, None]):
+	"""
+	resolve behalf
+	Args:
+		group_id: group id
+		behalf: qqid or nickname
+	"""
+	if not behalf:
+		return None
+	try:
+		return QQid(int(behalf))
+	except ValueError:
+		# Search by nick name
+		members = Clan_member.select(Clan_member, User).join(User, on=(Clan_member.qqid == User.qqid).alias('usr')) \
+			.where((Clan_member.group_id == group_id) & (User.nickname.contains(behalf)))
+		if not members:
+			raise NickNameNotFound(behalf)
+		elif len(members) > 1:
+			raise NickNameAmbigous(behalf, [item.usr.nickname for item in members])
+		_logger.info(f'昵称查找 {behalf} -> {members[0].qqid}')
+		return QQid(members[0].qqid)
+
+
+def get_clan_daily_challenge_report(self,
+									group_id: Groupid,
+									pcrdate: Optional[Pcr_date] = None,
+									battle_id: Union[int, None] = None,
+									):
+	"""
+	get the unfinished challanges
+	Args:
+		group_id: group id
+		battle_id: battle id
+		pcrdate: pcrdate of report
+	"""
+	group = Clan_group.get_or_none(group_id=group_id)
+	if group is None:
+		raise GroupNotExist
+	if pcrdate is None:
+		pcrdate = pcr_datetime(group.game_server)[0]
+	if battle_id is None:
+		battle_id = group.battle_id
+	member_list = self.get_member_list(group_id)
+	member_reports = {}  # type: Dict[QQid, ClanMemberReport]
+	for member in member_list:
+		member_reports[member['qqid']] = ClanMemberReport(member['qqid'], member['nickname'])
+	for item in Clan_challenge.select().where(
+			Clan_challenge.gid == group_id,
+			Clan_challenge.bid == battle_id,
+			Clan_challenge.challenge_pcrdate == pcrdate,
+	):
+		report = member_reports[str(item.qqid)]
+		report.add_challenge(item.boss_cycle, item.boss_num, item.boss_health_ramain == 0, item.is_continue)
+	return member_reports
+
+
 #获取公会数据实例，确保每次获取的都是同一个
 def get_clan_group(self, group_id):
+	raw_group_id = group_id
+	group_id = self.get_group_principal(raw_group_id)
 	if group_id in self.group_data_list:
 		return self.group_data_list[group_id]
 	else:
@@ -286,7 +418,7 @@ def modify(self, group_id: Groupid, cycle=None, bossData=None):
 		else:
 			now_health[boss_num] = data["health"]
 			next_health[boss_num] = next_cycle_full_boss_health
-	
+
 	group.now_cycle_boss_health = json.dumps(now_health)
 	group.next_cycle_boss_health = json.dumps(next_health)
 	group.boss_cycle = cycle
@@ -384,12 +516,12 @@ def switch_data_slot(self, group_id: Groupid, battle_id: int):
 	group:Clan_group = get_clan_group(self, group_id)
 	if group is None: raise GroupNotExist
 	backups:Clan_group_backups = Clan_group_backups.get_or_create(
-		group_id = group_id, 
+		group_id = group_id,
 		battle_id = group.battle_id)[0]
 	restore:Clan_group_backups = Clan_group_backups.get_or_create(
-		group_id = group_id, 
+		group_id = group_id,
 		battle_id = battle_id)[0]
-	
+
 	#备份
 	backups_group_data = {
 		"group_name": group.group_name,
@@ -431,7 +563,7 @@ def switch_data_slot(self, group_id: Groupid, battle_id: int):
 		level = self._level_by_cycle(2, group.game_server)
 		for boss_num, health in enumerate(self.bossinfo[group.game_server][level]):
 			next_cycle_boss_health[boss_num+1] = health
-		
+
 		group.now_cycle_boss_health = json.dumps(now_cycle_boss_health)
 		group.next_cycle_boss_health = json.dumps(next_cycle_boss_health)
 		group.boss_cycle = 1
@@ -494,17 +626,24 @@ def send_remind(self,
 		send_private_msg: 是否私聊发送
 	"""
 	sender_name = self._get_nickname_by_qqid(sender)
+	real_member_list = []
+	for member in member_list:
+		if ShadowQQ.is_shadow(member):
+			real_member_list.append(ShadowQQ.get_delegate(member))
+		else:
+			real_member_list.append(member)
+	member_list = real_member_list
 	if send_private_msg:
 		asyncio.ensure_future(self.send_private_remind(
 			member_list=member_list,
-			content=f'{sender_name}提醒您及时完成今日出刀',
+			content=f'{sender_name}提醒您及时完成今日出刀，早出到早下班',
 		))
 	else:
 		message = ' '.join(atqq(qqid) for qqid in member_list)
 		asyncio.ensure_future(self.api.send_group_msg(
-			self_id = who_am_i(group_id), 
+			self_id = who_am_i(group_id),
 			group_id=group_id,
-			message=message+f'\n=======\n{sender_name}提醒您及时完成今日出刀',
+			message=message+f'\n=======\n{sender_name}提醒您及时完成今日出刀，早出到早下班',
 		))
 
 #发送代刀提醒给被代刀的玩家
@@ -582,7 +721,7 @@ def challenge(self,
 	if now_cycle_boss_health[boss_num] == 0 and next_cycle_boss_health[boss_num] != 0:
 		boss_cycle += 1
 		real_cycle_boss_health = next_cycle_boss_health
-	elif now_cycle_boss_health[boss_num] == 0 and next_cycle_boss_health[boss_num] == 0: 
+	elif now_cycle_boss_health[boss_num] == 0 and next_cycle_boss_health[boss_num] == 0:
 		raise InputError('只能挑战2个周目内的同个boss')
 	if (not defeat) and (damage >= real_cycle_boss_health[boss_num]):
 		raise InputError('伤害超出剩余血量，如击败请使用尾刀')
@@ -663,7 +802,7 @@ def challenge(self,
 	group.save()
 
 	# 取消申请出刀
-	if defeat: 
+	if defeat:
 		self.take_it_of_the_tree(group_id, qqid, boss_num, 1, send_web = False)#只是通知下树而已
 		self.cancel_blade(group_id, qqid, boss_num, 2, False)
 		if check_next_boss(self, group_id, boss_num):
@@ -781,7 +920,7 @@ def subscribe_remind(self, group_id:Groupid, boss_num):
 		hint_message += '\n'
 	hint_message = hint_message[:-1]
 	asyncio.ensure_future(self.api.send_group_msg(
-		self_id = who_am_i(group_id), 
+		self_id = who_am_i(group_id),
 		group_id = group_id,
 		message = hint_message,
 	))
@@ -852,7 +991,7 @@ def put_on_the_tree(self, group_id: Groupid, qqid: QQid, message=None):
 		raise GroupError('你都没申请出刀，挂啥子树啊 (╯‵□′)╯︵┻━┻')
 	if challenging_member_list[boss_num][str(qqid)]['tree']:
 		raise GroupError('您已经在树上了')
-	
+
 	challenging_member_list[boss_num][str(qqid)]['tree'] = True
 	challenging_member_list[boss_num][str(qqid)]['msg'] = message
 	group.challenging_member_list = json.dumps(challenging_member_list)
@@ -875,7 +1014,7 @@ def take_it_of_the_tree(self, group_id: Groupid, qqid: QQid, boss_num=0, take_it
 	"""
 	group:Clan_group = get_clan_group(self, group_id)
 	if group is None: raise GroupNotExist
-	
+
 	user = User.get_or_none(qqid=qqid)
 	if user is None: raise GroupError('请先加入公会')
 
@@ -896,7 +1035,7 @@ def take_it_of_the_tree(self, group_id: Groupid, qqid: QQid, boss_num=0, take_it
 			if info['tree']: notice.append(atqq(challenger))
 		if len(notice) > 0:
 			asyncio.ensure_future(self.api.send_group_msg(
-				self_id = who_am_i(group_id), 
+				self_id = who_am_i(group_id),
 				group_id = group_id,
 				message = '可以下树惹~ _(:з)∠)_\n'+'\n'.join(notice),
 			))
@@ -940,7 +1079,7 @@ def apply_for_challenge(self, is_continue, group_id:Groupid, qqid:QQid, boss_num
 		raise GroupError('你已经申请过了 (╯‵□′)╯︵┻━┻')
 
 	now_cycle_boss_health = safe_load_json(group.now_cycle_boss_health, {})
-	if (not check_next_boss(self, group_id, boss_num) 
+	if (not check_next_boss(self, group_id, boss_num)
 		and now_cycle_boss_health[boss_num] == 0):
 		raise GroupError('只能挑战2个周目内且不跨阶段的同个boss，请等待该周目的boss全部击杀完毕')
 
@@ -964,15 +1103,15 @@ def apply_for_challenge(self, is_continue, group_id:Groupid, qqid:QQid, boss_num
 		raise GroupError('您没有补偿刀')
 	if finished + tail_blade - all_cont_blade >= 3 and cont_blade != 0:
 		is_continue = True
-	
+
 	nik = self._get_nickname_by_qqid(challenger)
 	info = [f'{nik}已开始挑战boss，剩最后几秒的时候记得暂停报伤害哦~']
 	challenging_list = safe_load_json(group.challenging_member_list, {})
 	if boss_num not in challenging_list:
 		challenging_list[boss_num] = {}
 	challenging_list[boss_num][challenger] = {
-		'is_continue' : is_continue, 
-		'behalf' : behalf, 
+		'is_continue' : is_continue,
+		'behalf' : behalf,
 		's' : 0,
 		'damage' : 0,
 		'tree' : False,
@@ -1142,7 +1281,7 @@ def challenger_info_small(self, group:Clan_group, boss_num, msg:List = None):
 	next_health = safe_load_json(group.next_cycle_boss_health)[boss_num]
 
 	challenging_list = safe_load_json(group.challenging_member_list)
-	if challenging_list and (boss_num in challenging_list): 
+	if challenging_list and (boss_num in challenging_list):
 		challenging_list = challenging_list[boss_num]
 	else:
 		challenging_list = None
@@ -1214,7 +1353,7 @@ def challenger_info(self, group_id):
 			if num > 0: temp_msg += f'{self._get_nickname_by_qqid(qqid)}*{num}，'
 		temp_msg += f'还有补偿刀未出'
 		msg.append(temp_msg)
-	
+
 	msg.append('====================')
 	for boss_num in range(5):
 		self.challenger_info_small(group, str(boss_num+1), msg)
@@ -1226,7 +1365,7 @@ def challenger_info(self, group_id):
 			line += 1
 		msg[once] = ''.join(str_list)
 	back_msg = text_2_pic(self, '\n'.join(msg), 250, (len(msg)+line)*20 + 10, (255, 255, 255), "#000000", 15, (10, 5))
-	
+
 	return back_msg
 
 #出刀记录
@@ -1400,7 +1539,7 @@ def get_member_list(self, group_id: Groupid) -> List[Dict[str, Any]]:
 		User.deleted == False,
 	):
 		member_list.append({
-			'qqid': user.qqid,
+			'qqid': str(user.qqid),
 			'nickname': user.nickname,
 			'sl': user.clan_member.last_save_slot,
 		})

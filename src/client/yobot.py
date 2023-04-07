@@ -35,7 +35,7 @@ else:
 
 
 class Yobot:
-    Version = "[v4.0.2]"
+    Version = "[v4.0.2] Channel Delegate"
     Version_id = 302
     #  "git rev-list --count HEAD"
 

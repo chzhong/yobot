@@ -7,7 +7,7 @@ from .components.kernel import init, execute, jobs, match
 from .components.score import score_table
 from .components.realize import *
 from .components.realize import (_level_by_cycle, _get_nickname_by_qqid,
-				_get_group_previous_challenge, _update_group_list_async, 
+				_get_group_previous_challenge, _update_group_list_async,
 				_fetch_member_list_async, _update_all_group_members_async,
 				_update_user_nickname_async, _boss_data_dict, _get_available_empty_battle_id)
 
@@ -29,8 +29,8 @@ class ClanBattle:
 		# data initialize
 		self._boss_status:Dict[str, asyncio.Future] = {}
 		self.init(glo_setting, bot_api, boss_id_name, args, kwargs)
-		
-	
+
+
 	register_routes = register_routes #网页端操作
 
 	score_table = score_table	#业绩
@@ -79,5 +79,15 @@ class ClanBattle:
 	get_report = get_report										##获取报告
 	get_battle_member_list = get_battle_member_list				##从会战记录里获取成员列表
 	get_member_list = get_member_list							##获取所有成员列表
-	
+
+	bind_group_principal = bind_group_principal				## 绑定代理群
+	get_group_principal = get_group_principal				## 代理群转公会群
+
+	bind_group_for_shadow = bind_group_for_shadow			## 绑定小号
+	unbind_group_for_shadow = unbind_group_for_shadow		## 解绑小号
+	resolve_behalf = resolve_behalf							## 解析昵称到QQ号
+
+	get_clan_daily_challenge_report = get_clan_daily_challenge_report ## 催刀用
+
+
 
