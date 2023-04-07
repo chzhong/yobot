@@ -163,7 +163,6 @@ def execute(self, match_num, ctx):
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @昵称 [昨日]
 			r"^报刀 ?(?:[-=]?([1-5]))? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$",
 		), cmd)
-		match = re.match(, cmd)
 		if not match:
 			return '''报刀格式:
 报刀 [boss编号(1-5)] 伤害 [是否补偿] [@被代人] [是否昨日]
