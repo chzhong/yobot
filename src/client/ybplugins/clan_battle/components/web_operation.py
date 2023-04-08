@@ -597,6 +597,8 @@ def register_routes(self, app: Quart):
 		if 'yobot_user' not in session:
 			return redirect(url_for('yobot_login', callback=request.path))
 		user = User.get_by_id(session['yobot_user'])
+		sender_group_id = group_id
+		group_id = self.get_group_principal(sender_group_id)		
 		group = Clan_group.get_or_none(group_id=group_id)
 		if group is None:
 			return await render_template('404.html', item='公会'), 404
@@ -634,6 +636,8 @@ def register_routes(self, app: Quart):
 				'clan/<int:group_id>/statistics/api/'),
 		methods=['GET'])
 	async def yobot_clan_statistics_api(group_id):
+		sender_group_id = group_id
+		group_id = self.get_group_principal(sender_group_id)		
 		group = Clan_group.get_or_none(group_id=group_id)
 		if group is None:
 			return jsonify(code=20, message='Group not exists')

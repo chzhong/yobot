@@ -8,5 +8,7 @@ src/client/yobot_data/yobot_config.json
 src/client/public/template/help/
 src/client/public/static/aya.ico
 src/client/yobot_data/
+src/client/yobotg.pid
+src/client/yobotg.sh
 .venv/
 .idea/

@@ -11,6 +11,8 @@ from .components.realize import (_level_by_cycle, _get_nickname_by_qqid,
 				_fetch_member_list_async, _update_all_group_members_async,
 				_update_user_nickname_async, _boss_data_dict, _get_available_empty_battle_id)
 
+from .components.realize_mod import *
+
 
 class ClanBattle:
 	Passive = True

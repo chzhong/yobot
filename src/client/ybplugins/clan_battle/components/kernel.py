@@ -2,12 +2,14 @@ import asyncio
 import logging
 import os
 import re
-from typing import Any, Dict
+import sys
+from typing import Any, Dict, List
 from urllib.parse import urljoin
 
 from aiocqhttp.api import Api
 from apscheduler.triggers.cron import CronTrigger
 
+from ..typing import Groupid
 from ...ybdata import Clan_group, Clan_member, User
 from ..exception import ClanBattleError, InputError
 from ..util import atqq
@@ -16,7 +18,7 @@ from .define import Commands, Server
 _logger = logging.getLogger(__name__)
 
 
-def match_patterns(patterns: [str], cmd: str):
+def match_patterns(patterns: List[str], cmd: str):
 	for pattern in patterns:
 		match = re.match(pattern, cmd)
 		if match:
@@ -46,7 +48,7 @@ def init(self,
 		encoding='utf-8',
 	)
 	filehandler.setFormatter(formater)
-	consolehandler = logging.StreamHandler()
+	consolehandler = logging.StreamHandler(stream=sys.stdout)
 	consolehandler.setFormatter(formater)
 	_logger.addHandler(filehandler)
 	_logger.addHandler(consolehandler)
@@ -490,7 +492,7 @@ def execute(self, match_num, ctx):
 		_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
 		return "进度已重置\n当前档案编号已从 {} 切换为 {}".format(current_data_slot_record, available_empty_battle_id)
 
-	elif match_num == 99: # 催刀
+	elif match_num == 990: # 催刀
 		if ctx['sender']['role'] == 'member':
 			return "只有管理员有权限催刀"
 		report = self.get_clan_daily_challenge_report(group_id)
@@ -517,7 +519,7 @@ def execute(self, match_num, ctx):
 			return
 		if '代理帮助' == cmd:
 			return '管理员设置本群（管理员小群等）代理公会群：\n代理 公会群号\n或者由下面命令取消代理其他公会：\n代理取消'
-		match = re.match(r'^代理(取消)?\s*(\d+)?\s*$', cmd)
+		match = re.match(r'^代理(取消)?\s+(\d+)\s*$', cmd)
 		if not match:
 			return
 		is_cancel = match.group(1)
@@ -539,22 +541,35 @@ def execute(self, match_num, ctx):
 			return
 		if '小号帮助' == cmd:
 			return '管理员可以添加/删除小号：\n小号添加/删除 昵称 号主QQ\n- 或者 -\n小号添加/删除 昵称 号主QQ @号主'
-		match = re.match(r'^小号(添加|删除)\s*(.+)\s*\[CQ:at,qq=(\d+)\]\s*$', cmd)
-		if not match:
-			match = re.match(r'^小号(添加|删除)\s*(.+)\s+(\d+)\s*$', cmd)
-			if not match:
-				return
+		# 1: add/remove, 2: nickname, 3: owner
+		match = match_patterns((
+			r'^小号(添加|删除)\s+(.+?)\s*\[CQ:at,qq=(\d+)\]\s*$',
+			r'^小号(添加|删除)\s+(.+?)\s+(\d+)\s*$',
+			r'^小号(添加|删除)\s+(.+?)\s+@(.+?)\s*$',
+		), cmd)
+		if not match: return f'错误的格式：『{cmd}』'
 		shadow_action = match.group(1)
 		shadow_user_name = match.group(2)
-		owner_user_id = QQid(int(match.group(3)))
-		if '添加' == shadow_action:
-			self.bind_group_for_shadow(group_id, owner_user_id, shadow_user_name)
-			_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
-			return '已设置小号 {}(号主：{})'.format(shadow_user_name, atqq(owner_user_id))
-		elif '删除' == shadow_action:
-			self.unbind_group_for_shadow(group_id, owner_user_id, shadow_user_name)
-			_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
-			return '已删除小号 {}(号主：{}) 群'.format(shadow_user_name, atqq(owner_user_id))
+		try:
+			owner_user_id = self.resolve_behalf(group_id, match.group(3))
+			if not owner_user_id:
+				return f'无法找到： {shadow_user_name} 的大号 {match.group(3)}。他是否已经已经加入工会？'
+			if '添加' == shadow_action:
+				asyncio.ensure_future(self.bind_group_for_shadow(group_id, owner_user_id, shadow_user_name))
+				_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+				return '已设置小号 {}(号主：{})'.format(shadow_user_name, atqq(owner_user_id))
+			elif '删除' == shadow_action:
+				asyncio.ensure_future(self.unbind_group_for_shadow(group_id, owner_user_id, shadow_user_name))
+				_logger.info('群聊 成功 {} {} {}'.format(user_id, group_id, cmd))
+				return '已删除小号 {}(号主：{}) 群'.format(shadow_user_name, atqq(owner_user_id))
+			else:
+				return f'指令：{shadow_action} 不正确'
+		except ClanBattleError as e:
+			_logger.warning('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
+			return str(e)
+		except Exception as e:
+			_logger.warning('群聊 失败 {} {} {}'.format(user_id, group_id, cmd), exc_info=1)
+			return str(e)
 
 
 

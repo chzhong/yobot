@@ -13,8 +13,10 @@ class GroupNotExist(GroupError):
         super().__init__(msg, *args)
 class NickNameNotFound(UserError):
     def __init__(self, nickname, *args):
-        super.__init__(msg=f'找不到昵称为“{nickname}”的会员', *args)
+        msg = f'找不到昵称为“{nickname}”的会员'
+        super().__init__(msg, *args)
 class NickNameAmbigous(UserError):
     def __init__(self, nickname: str, candidates: List[str], *args):
         name_list = '\n- '.join(candidates)
-        super.__init__(msg=f'会员昵称“{nickname}”不明确，可能是如下会员:\n- {name_list}', *args)
+        msg = f'会员昵称“{nickname}”不明确，可能是如下会员:\n- {name_list}'
+        super().__init__(msg, *args)
