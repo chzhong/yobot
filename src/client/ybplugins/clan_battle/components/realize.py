@@ -45,9 +45,10 @@ def text_2_pic(self, text:string, weight:int, height:int, bg_color:Tuple, text_c
 
 
 #获取公会数据实例，确保每次获取的都是同一个
-def get_clan_group(self, group_id):
-	raw_group_id = group_id
-	group_id = self.get_group_principal(raw_group_id)
+def get_clan_group(self, group_id, resolve_delegate=True):
+	if resolve_delegate:
+		raw_group_id = group_id
+		group_id = self.get_group_principal(raw_group_id)
 	if group_id in self.group_data_list:
 		return self.group_data_list[group_id]
 	else:
@@ -95,7 +96,7 @@ async def _update_group_list_async(self):
 		return False
 
 	for group_info in group_list:
-		group:Clan_group = get_clan_group(self, group_info['group_id'],)
+		group:Clan_group = get_clan_group(self, group_info['group_id'], resolve_delegate=False)
 		if group is None : continue
 		group.group_name = group_info['group_name']
 		group.save()
