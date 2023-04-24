@@ -161,22 +161,22 @@ def execute(self, match_num, ctx):
 		# 1: boss_num, 2: damage, 3: unit?, 4: continue?, 5: behalf?, 6: yesterday?
 		match = match_patterns((
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @qq [昨日]
-			r"^报刀 ?(?:[-=]?([1-5]))? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$",
+			r"^报刀 ?(?:[-=]?([1-5]))? +(\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$",
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @昵称 [昨日]
-			r"^报刀 ?(?:[-=]?([1-5]))? (\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$",
+			r"^报刀 ?(?:[-=]?([1-5]))? +(\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$",
 		), cmd)
 		if not match:
-			return '''报刀格式:
-报刀 [boss编号(1-5)] 伤害 [是否补偿] [@被代人] [是否昨日]
-比如：
-报刀 1700w（需先申请出刀）
-报刀 1 1700w（1表示报在1王）
-报刀 1 250w 补（b表示出补偿刀）
-报刀 1 1700w 昨日（昨日代表补报昨天的出刀）
+			return '''报刀帮助：
+* 出整刀并击杀一王，发送：尾刀1
+* 出补偿刀并击杀二王，发送：尾刀2b
+* 出整刀打对三王造成1700万伤害，发送：报刀3 1700w
+* 出补偿刀对四王造成250万伤害，发送：报刀4 250w 补
 
-伤害可以用具体伤害，也可以用带单位的伤害（支持的单位：wW万）；如果击败Boss收尾请使用“尾刀”指令。
+无需区分是第几刀的补偿，只需要区分好整刀和补偿。
+伤害可以用具体伤害，也可以用带单位的伤害（支持的单位：wW万）
 可以跟 @某人 代为报刀，@ 后面可以是 QQ 或者是昵称
 可以跟 昨日 补报昨天的刀
+如果报刀错误，可以发送：撤销  来取消前一次报刀。
 '''
 		unit = {
 			'W': 10000,
@@ -214,11 +214,23 @@ def execute(self, match_num, ctx):
 		# 1: boss_num, 2: continue?, 3: behalf?, 4: yesterday?
 		match = match_patterns((
 			# 尾刀 [boss_num] [补偿] @qq [昨日]
-			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? ?(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$',
+			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$',
 			# 尾刀 [boss_num] [补偿] @昵称 [昨日]
-			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? ?(?:@(.+?))? *(昨[日天])?$',
+			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$',
 		), cmd)
-		if not match: return
+		if not match: 
+			return '''报刀帮助：
+* 出整刀并击杀一王，发送：尾刀1
+* 出补偿刀并击杀二王，发送：尾刀2b
+* 出整刀打对三王造成1700万伤害，发送：报刀3 1700w
+* 出补偿刀对四王造成250万伤害，发送：报刀4 250w 补
+
+无需区分是第几刀的补偿，只需要区分好整刀和补偿。
+伤害可以用具体伤害，也可以用带单位的伤害（支持的单位：wW万）
+可以跟 @某人 代为报刀，@ 后面可以是 QQ 或者是昵称
+可以跟 昨日 补报昨天的刀
+如果报刀错误，可以发送：撤销  来取消前一次报刀。
+'''
 		#behalf = match.group(3) and int(match.group(3))
 		# 支持昵称代报刀
 		try:
@@ -366,8 +378,8 @@ def execute(self, match_num, ctx):
 	elif match_num == 13:  # 取消
 		# 1: boss_num or type, 2: boss_num?, 3: behalf?
 		match = match_patterns((
-			r'^取消 *([1-5]|挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:\[CQ:at,qq=(\d+)\])? *$',
-			r'^取消 *([1-5]|挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:@(.+?))? *$',
+			r'^取消 *(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			r'^取消 *(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:@(.+?))? *$',
 		), cmd)
 		if not match: return
 		b = match.group(1)
@@ -395,7 +407,7 @@ def execute(self, match_num, ctx):
 			elif b == '预约':
 				msg = self.subscribe_cancel(group_id, boss_num, user_id)
 			else:
-				raise InputError("未能识别命令：{}".format(b))
+				raise InputError("未能识别命令：{}。可能的命令：取消挂树/取消预约/取消申请/取消SL 等".format(b))
 		except ClanBattleError as e:
 			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
 			return str(e)
@@ -570,6 +582,3 @@ def execute(self, match_num, ctx):
 		except Exception as e:
 			_logger.warning('群聊 失败 {} {} {}'.format(user_id, group_id, cmd), exc_info=1)
 			return str(e)
-
-
-
