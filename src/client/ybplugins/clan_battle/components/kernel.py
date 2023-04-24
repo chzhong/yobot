@@ -161,9 +161,9 @@ def execute(self, match_num, ctx):
 		# 1: boss_num, 2: damage, 3: unit?, 4: continue?, 5: behalf?, 6: yesterday?
 		match = match_patterns((
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @qq [昨日]
-			r"^报刀 ?(?:[-=]?([1-5]))? +(\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$",
+			r"^报刀\s?(?:[-=]?([1-5]))?\s+(\d+)([Ww万Kk千])?\s*(补偿|补|b|bc)?\s*(?:\[CQ:at,qq=(\d+)\])?\s*(昨[日天])?$",
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @昵称 [昨日]
-			r"^报刀 ?(?:[-=]?([1-5]))? +(\d+)?([Ww万Kk千])? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$",
+			r"^报刀\s?(?:[-=]?([1-5]))?\s+(\d+)([Ww万Kk千])?\s*(补偿|补|b|bc)?\s*(?:@(.+?))?\s*(昨[日天])?$",
 		), cmd)
 		if not match:
 			return '''报刀帮助：
@@ -214,9 +214,9 @@ def execute(self, match_num, ctx):
 		# 1: boss_num, 2: continue?, 3: behalf?, 4: yesterday?
 		match = match_patterns((
 			# 尾刀 [boss_num] [补偿] @qq [昨日]
-			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *(昨[日天])?$',
+			r'^尾刀\s?(?:[-=]?([1-5]))?\s*(补偿|补|b|bc)?\s*(?:\[CQ:at,qq=(\d+)\])?\s*(昨[日天])?$',
 			# 尾刀 [boss_num] [补偿] @昵称 [昨日]
-			r'^尾刀 ?(?:[-=]?([1-5]))? *(补偿|补|b|bc)? *(?:@(.+?))? *(昨[日天])?$',
+			r'^尾刀\s?(?:[-=]?([1-5]))?\s*(补偿|补|b|bc)?\s*(?:@(.+?))?\s*(昨[日天])?$',
 		), cmd)
 		if not match: 
 			return '''报刀帮助：
@@ -303,7 +303,7 @@ def execute(self, match_num, ctx):
 		return back_msg
 
 	elif match_num == 9:  # 出刀记录
-		match = re.match(r'^出刀(记录|情况|状况|详情) *$', cmd)
+		match = re.match(r'^出刀(记录|情况|状况|详情)\s*$', cmd)
 		if not match: return
 		try:
 			back_msg = self.challenge_record(group_id)
@@ -317,9 +317,9 @@ def execute(self, match_num, ctx):
 		# 1: message?, 2: behalf?
 		match = match_patterns((
 			# 挂树[：留言] [@qq]
-			r'^挂树 *(?:[\:：](.*))? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			r'^挂树 *(?:[\:：](.*))?\s*(?:\[CQ:at,qq=(\d+)\])?\s*$',
 			# 挂树[：留言] [@昵称]
-			r'^预约([1-5]|表) *(?:[:：](.+))? *(?:@(.+?))? *$',
+			r'^预约([1-5]|表)\s*(?:[:：](.+))?\s*(?:@(.+?))?\s*$',
 		), cmd)
 		if not match: return
 		extra_msg = match.group(1)
@@ -350,9 +350,9 @@ def execute(self, match_num, ctx):
 		match = match_patterns((
 			# 进(1-5) [补] [@qq]
 			# 申请出刀(1-5) [补]  [@qq]
-			r'^(?:进|申请出刀)(| )([1-5]) *(补偿|补|b|bc)? *(?:\[CQ:at,qq=(\d+)\])? *$',
+			r'^(?:进|申请出刀)(|\s)([1-5])\s*(补偿|补|b|bc)?\s*(?:\[CQ:at,qq=(\d+)\])? *$',
 			# 挂树[：留言] [@昵称]
-			r'^(?:进|申请出刀)(| )([1-5]) *(补偿|补|b|bc)? *(?:@(.+?))? *$',
+			r'^(?:进|申请出刀)(|\s)([1-5])\s*(补偿|补|b|bc)?\s*(?:@(.+?))? *$',
 		), cmd)
 		if not match: return '申请出刀格式错误惹(っ °Д °;)っ\n如：申请出刀1 or 进1 or 申请出刀1补偿@xxx or 进1补偿@xxx'
 		boss_num = match.group(2)
@@ -378,8 +378,8 @@ def execute(self, match_num, ctx):
 	elif match_num == 13:  # 取消
 		# 1: boss_num or type, 2: boss_num?, 3: behalf?
 		match = match_patterns((
-			r'^取消 *(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:\[CQ:at,qq=(\d+)\])? *$',
-			r'^取消 *(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约) *([1-5])? *(?:@(.+?))? *$',
+			r'^取消\s*(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约)\s*([1-5])?\s*(?:\[CQ:at,qq=(\d+)\])?\s*$',
+			r'^取消\s*(挂树|申请出刀|申请|出刀|出刀all|报伤害|sl|SL|预约)\s*([1-5])?\s*(?:@(.+?))?\s*$',
 		), cmd)
 		if not match: return
 		b = match.group(1)
@@ -421,8 +421,8 @@ def execute(self, match_num, ctx):
 	elif match_num == 16:  # SL
 		# 1: chekc?, 2: behalf?
 		match = match_patterns((
-			r'^查?(?:SL|sl) *([\?？])? *(?:\[CQ:at,qq=(\d+)\])? *([\?？])? *$',
-			r'^查?(?:SL|sl) *([\?？])? *(?:@(.+?))? *([\?？])? *$',
+			r'^查?(?:SL|sl) *([\?？])? *(?:\[CQ:at,qq=(\d+)\])? *([\?？])?\s*$',
+			r'^查?(?:SL|sl) *([\?？])? *(?:@(.+?))? *([\?？])?\s*$',
 		), cmd)
 		if not match: return
 		#behalf = match.group(2) and int(match.group(2))
