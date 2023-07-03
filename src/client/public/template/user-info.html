@@ -125,7 +125,7 @@
 			},
 			edit_clan_group: function (event) {
 				var thisvue = this;
-				axios.patch('./api/', { clan_group_id: thisvue.clan_group_id }).then(function (res) {
+				axios.put('./api/', { clan_group_id: thisvue.clan_group_id }).then(function (res) {
 					thisvue.edit_clan_group_id = false;
 				}).catch(function (error) {
 					alert('改名工会群失败');
