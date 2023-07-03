@@ -718,7 +718,7 @@ def undo(self, group_id: Groupid, qqid: QQid) :
 	last_challenge:Clan_challenge = self._get_group_previous_challenge(group)
 
 	if last_challenge is None: raise GroupError('本群无出刀记录')
-	if (last_challenge.qqid != qqid) and (user.authority_group >= 100): raise UserError('无权撤销')
+	if (last_challenge.qqid != qqid) and (user.authority_group >= 100): raise UserError('无权撤销，请联系会战管理员')
 
 	last_num = str(last_challenge.boss_num)	#上一刀的boss_num
 	last_cycle = last_challenge.boss_cycle	#上一刀的周目数
@@ -982,7 +982,7 @@ def apply_for_challenge(self, is_continue, group_id:Groupid, qqid:QQid, boss_num
 		is_continue = True
 
 	nik = self._get_nickname_by_qqid(challenger)
-	info = [f'{nik}已开始挑战boss。若要合刀，剩最后几秒的时候记得暂停报伤害哦~']
+	info = [f'{nik}已开始挑战boss。若要合刀，剩最后几秒的时候记得暂停报伤害哦~', '若要取消出刀，请发送： 取消申请 或 取消出刀']
 	challenging_list = safe_load_json(group.challenging_member_list, {})
 	if boss_num not in challenging_list:
 		challenging_list[boss_num] = {}

@@ -161,12 +161,14 @@ def execute(self, match_num, ctx):
 		# 1: boss_num, 2: damage, 3: unit?, 4: continue?, 5: behalf?, 6: yesterday?
 		match = match_patterns((
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @qq [昨日]
-			r"^报刀\s?(?:[-=]?([1-5]))?\s+(\d+)([Ww万Kk千])?\s*(补偿|补|b|bc)?\s*(?:\[CQ:at,qq=(\d+)\])?\s*(昨[日天])?$",
+			r"^报刀\s?(?:[-=]?(?P<boss_num>[1-5])\s+)?(?P<damage>\d+)(?P<unit>[Ww万Kk千])?\s*(?P<continue>补偿|补|b|bc)?\s*(?:\[CQ:at,qq=(?P<behalf>\d+)\])?\s*(?P<yesterday>昨[日天])?$",
+			r"^报刀\s?(?:[-=]?(?P<boss_num>[1-5])\s*)(?P<continue>补偿|补|b|bc)\s*(?P<damage>\d+)(?P<unit>[Ww万Kk千])?\s*(?:\[CQ:at,qq=(?P<behalf>\d+)\])?\s*(?P<yesterday>昨[日天])?$",
 			# 报刀 [-=]boss_num 伤害[单位] [补偿] @昵称 [昨日]
-			r"^报刀\s?(?:[-=]?([1-5]))?\s+(\d+)([Ww万Kk千])?\s*(补偿|补|b|bc)?\s*(?:@(.+?))?\s*(昨[日天])?$",
+			r"^报刀\s?(?:[-=]?(?P<boss_num>[1-5])\s+)?(?P<damage>\d+)(?P<unit>[Ww万Kk千])?\s*(?P<continue>补偿|补|b|bc)?\s*(?:@(?P<behalf>.+?))?\s*(?P<yesterday>昨[日天])?$",
+			r"^报刀\s?(?:[-=]?(?P<boss_num>[1-5])\s*)(?P<continue>补偿|补|b|bc)\s*(?P<damage>\d+)(?P<unit>[Ww万Kk千])?\s*(?:@(?P<behalf>.+?))?\s*(?P<yesterday>昨[日天])?$",
 		), cmd)
 		if not match:
-			return '''报刀帮助：
+			return '''报刀格式不正确：
 * 出整刀并击杀一王，发送：尾刀1
 * 出补偿刀并击杀二王，发送：尾刀2b
 * 出整刀打对三王造成1700万伤害，发送：报刀3 1700w
@@ -175,8 +177,7 @@ def execute(self, match_num, ctx):
 无需区分是第几刀的补偿，只需要区分好整刀和补偿。
 伤害可以用具体伤害，也可以用带单位的伤害（支持的单位：wW万）
 可以跟 @某人 代为报刀，@ 后面可以是 QQ 或者是昵称
-可以跟 昨日 补报昨天的刀
-如果报刀错误，可以发送：撤销  来取消前一次报刀。
+如果报刀错误，可以发送：撤销 来取消前一次报刀，撤回消息不会撤销报刀。
 '''
 		unit = {
 			'W': 10000,
@@ -185,18 +186,24 @@ def execute(self, match_num, ctx):
 			'k': 1000,
 			'K': 1000,
 			'千': 1000,
-		}.get(match.group(3), 1)
-		boss_num = match.group(1)
-		damage = int(match.group(2) or 0) * unit
-		is_continue = match.group(4) and True or False
+		}.get(match['unit'], 1)
+#		}.get(match.group(3), 1)
+		boss_num = match['boss_num']
+#		boss_num = match.group(1)
+		damage = int(match['damage'] or 0) * unit
+#		damage = int(match.group(2) or 0) * unit
+		is_continue = match['continue'] and True or False
+#		is_continue = match.group(4) and True or False
 		# behalf = match.group(5) and int(match.group(5))
 		# 支持昵称代报刀
 		try:
-			behalf = self.resolve_behalf(group_id, match.group(5))
+			behalf = self.resolve_behalf(group_id, match['behalf'])
+#			behalf = self.resolve_behalf(group_id, match.group(5))
 		except ClanBattleError as e:
 			_logger.info('群聊 失败 {} {} {}'.format(user_id, group_id, cmd))
 			return str(e)
-		previous_day = bool(match.group(6))
+		previous_day = bool(match['yesterday'])
+#		previous_day = bool(match.group(6))
 		try:
 			boss_status = self.challenge(group_id, user_id, False, damage, behalf, is_continue,
 				boss_num = boss_num, previous_day = previous_day)
